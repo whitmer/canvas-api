@@ -112,5 +112,29 @@ describe "GET requests" do
       json[0]['bacon'].should == true
       json.next_endpoint.should == nil
     end
+    
+    it "should append query parameters if specified" do
+      token_api
+      @api.generate_uri("/api/v1/bacon?c=x", {'a' => '1', 'b' => '2'}).request_uri.should == "/api/v1/bacon?c=x&access_token=#{@api.token}&a=1&b=2"
+      @api.should_receive(:generate_uri).with('/api/v1/bob', {'a' => 1})
+      @api.should_receive(:get_request).and_raise("stop here")
+      expect { @api.get("/api/v1/bob", {'a' => 1}) }.to raise_error("stop here")
+    end
+    
+    it "should handle numerical query parameters" do
+      token_api
+      @api.generate_uri("/api/v1/bacon", {'a' => 1, 'b' => 2, 'c' => @api}).request_uri.should == "/api/v1/bacon?access_token=#{@api.token}&a=1&b=2&c=#{CGI.escape(@api.to_s)}"
+    end
+    
+    it "should handle array query parameters, with or without the []" do
+      token_api
+      @api.generate_uri("/api/v1/bacon", {'a[]' => 1, 'b' => [2,3]}).request_uri.should == "/api/v1/bacon?access_token=#{@api.token}&a%5B%5D=1&b%5B%5D=2&b%5B%5D=3"
+      @api.generate_uri("/api/v1/bacon", [['a[]', 1], ['b', [2,3]]]).request_uri.should == "/api/v1/bacon?access_token=#{@api.token}&a%5B%5D=1&b%5B%5D=2&b%5B%5D=3"
+    end
+    
+    it "should not fail on no query parameters argument" do
+      token_api
+      @api.generate_uri("/api/v1/bacon").request_uri.should == "/api/v1/bacon?access_token=#{@api.token}"
+    end
   end
 end

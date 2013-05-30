@@ -1,5 +1,6 @@
 lib_dir = File.expand_path(File.join(File.dirname(__FILE__), '..', 'lib'))
 $LOAD_PATH.unshift(lib_dir) unless $LOAD_PATH.include?(lib_dir)
+SLEEP_TIME = 0.1
 
 require 'canvas-api'
 require 'rspec'
@@ -12,6 +13,10 @@ end
 
 def client_api
   @api = Canvas::API.new(:host => "http://canvas.example.com", :client_id => rand(99999), :secret => rand(99999).to_s)
+end
+
+def file_handle
+  File.open(File.expand_path(File.join(File.dirname(__FILE__), '..', 'lib', 'canvas-api.rb')))
 end
 
 def url_called(api, *args)

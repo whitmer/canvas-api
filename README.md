@@ -46,6 +46,29 @@ canvas.get("/api/v1/users/self/profile")
 # => {id: 90210, name: "Annie Wilson", ... }
 ```
 
+For POST and PUT requests the second parameter is the form parameters to append, either as a hash or
+an array of arrays:
+
+```ruby
+canvas = Canvas::API.new(:host => "https://canvas.example.com", :token => "qwert")
+canvas.put("/api/v1/users/self", {'user[name]' => 'Dixon Wilson', 'user[short_name]' => 'Dixon'})
+# => {id: 90210, name: "Dixon Wilson", ... }
+canvas.put("/api/v1/users/self", {'user' => {'name' => 'Dixon Wilson', 'short_name' => 'Dixon'}}) # this is synonymous with the previous call
+# => {id: 90210, name: "Dixon Wilson", ... }
+canvas.put("/api/v1/users/self", [['user[name]', 'Dixon Wilson'],['user[short_name]', 'Dixon']]) # this is synonymous with the previous call
+# => {id: 90210, name: "Dixon Wilson", ... }
+```
+
+On GET requests you can either append query parameters to the actual path or as a hashed second argument:
+
+```ruby
+canvas = Canvas::API.new(:host => "https://canvas.example.com", :token => "qwert")
+canvas.get("/api/v1/users/self/enrollments?type[]=TeacherEnrollment&type[]=TaEnrollment")
+# => [{id: 1234, course_id: 5678, ... }, {id: 2345, course_id: 6789, ...}]
+canvas.get("/api/v1/users/self/enrollments", {'type' => ['TeacherEnrollment', 'TaEnrollment']}) # this is synonymous with the previous call
+# => [{id: 1234, course_id: 5678, ... }, {id: 2345, course_id: 6789, ...}]
+```
+
 ### Pagination
 
 API endpoints that return lists are often paginated, meaning they will only return the first X results
@@ -75,7 +98,66 @@ There are also some helper methods that can make some of the other tricky parts 
 
 #### File Uploads
 
-TODO...
+Uploading files ia typically a multi-step process. There are three different ways to upload
+files.
+
+Upload a file from the local file system:
+
+
+```ruby
+canvas = Canvas::API.new(:host => "https://canvas.example.com", :token => "qwert")
+canvas.upload_file_from_local("/api/v1/users/self/files", File.open("/path/to/file.jpg"), :content_type => "image/jpeg")
+# => {id: 1, display_name: "file.jpg", ... }
+```
+
+Upload a file synchronously from a remote URL:
+
+```ruby
+canvas = Canvas::API.new(:host => "https://canvas.example.com", :token => "qwert")
+canvas.upload_file_from_url("/api/v1/users/self/files", :name => "image.jpg", :size => 12345, :url => "http://www.example.com/image.jpg")
+# => {id: 1, display_name: "image.jpg", ... }
+```
+
+Upload a file asynchronouysly from a remote URL:
+
+```ruby
+canvas = Canvas::API.new(:host => "https://canvas.example.com", :token => "qwert")
+status_url = canvas.upload_file_from_url("/api/v1/users/self/files", :asynch => true, :name => "image.jpg", :size => 12345, :url => "http://www.example.com/image.jpg")
+# => "/api/v1/file_status/url"
+canvas.get(status_url)
+# => {upload_status: "pending"}
+canvas.get(status_url)
+# => {upload_status: "ready", attachment: {id: 1, display_name: "image.jpg", ... } }
+```
+
+```ruby
+canvas = Canvas::API.new(:host => "https://canvas.example.com", :token => "qwert")
+status_url = canvas.upload_file_from_url("/api/v1/users/self/files", :asynch => true, :name => "image.jpg", :size => 12345, :url => "http://www.example.com/image.jpg")
+# => "/api/v1/file_status/url"
+canvas.get(status_url)
+# => {upload_status: "errored", message: "Invalid response code, expected 200 got 404"}
+```
+
+For any of these upload types you can optionally provide additional configuration parameters if
+the upload endpoint is to an area of Canvas that supports folders (user files, course files, etc.)
+
+```ruby
+canvas = Canvas::API.new(:host => "https://canvas.example.com", :token => "qwert")
+#
+# upload the file to a known folder with id 1234
+canvas.upload_file_from_url("/api/v1/users/self/files", :parent_folder_id => 1234, :name => "image.jpg", :size => 12345, :url => "http://www.example.com/image.jpg")
+# => {id: 1, display_name: "image.jpg", ... }
+#
+# upload the file to a folder with the path "/friends"
+canvas.upload_file_from_url("/api/v1/users/self/files", :parent_folder_path => "/friends", :name => "image.jpg", :size => 12345, :url => "http://www.example.com/image.jpg")
+# => {id: 1, display_name: "image.jpg", ... }
+#
+# rename this file instead of overwriting a file with the same name (overwrite is the default)
+canvas.upload_file_from_url("/api/v1/users/self/files", :on_duplicate => "rename", :name => "image.jpg", :size => 12345, :url => "http://www.example.com/image.jpg")
+# => {id: 1, display_name: "image.jpg", ... }
+```
+
+
 
 #### SIS ID Encoding
 

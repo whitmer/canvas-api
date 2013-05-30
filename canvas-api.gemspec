@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name = %q{canvas-api}
-  s.version = "0.5"
+  s.version = "0.6"
 
   s.add_dependency 'json'
 

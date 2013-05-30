@@ -1,7 +1,9 @@
 require 'uri'
 require 'cgi'
 require 'net/http'
+require 'net/http/post/multipart'
 require 'json'
+
 
 module Canvas
   class API
@@ -79,11 +81,21 @@ module Canvas
       raise "invalid endpoint" unless (URI.parse(endpoint) rescue nil)
     end
   
-    def generate_uri(endpoint)
+    def generate_uri(endpoint, params=nil)
       validate_call(endpoint)
       unless @token == "ignore"
         endpoint += (endpoint.match(/\?/) ? "&" : "?") + "access_token=" + @token
         endpoint += "&as_user_id=" + @as_user_id.to_s if @as_user_id
+      end
+      (params || {}).each do |key, value|
+        if value.is_a?(Array)
+          key = key + "[]" unless key.match(/\[\]/)
+          value.each do |val|
+            endpoint += (endpoint.match(/\?/) ? "&" : "?") + "#{CGI.escape(key.to_s)}=#{CGI.escape(val.to_s)}"
+          end
+        else
+          endpoint += (endpoint.match(/\?/) ? "&" : "?") + "#{CGI.escape(key.to_s)}=#{CGI.escape(value.to_s)}"
+        end
       end
       @uri = URI.parse(@host + endpoint)
       @http = Net::HTTP.new(@uri.host, @uri.port)
@@ -121,8 +133,8 @@ module Canvas
       Net::HTTP::Get.new(@uri.request_uri)
     end
   
-    def get(endpoint)
-      generate_uri(endpoint)
+    def get(endpoint, params=nil)
+      generate_uri(endpoint, params)
       request = get_request(endpoint)
       retrieve_response(request)
     end
@@ -134,30 +146,108 @@ module Canvas
     end
   
     def put(endpoint, params={})
-      generate_uri(endpoint)
+      generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
       request = Net::HTTP::Put.new(@uri.request_uri)
-      request.set_form_data(params)
+      request.set_form_data(clean_params(params))
       retrieve_response(request)
     end
   
     def post(endpoint, params={})
-      generate_uri(endpoint)
+      generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
       request = Net::HTTP::Post.new(@uri.request_uri)
-      request.set_form_data(params)
+      request.set_form_data(clean_params(params))
       retrieve_response(request)
     end
-  
-    def upload_file_from_local
-      # TODO
+    
+    def clean_params(params, prefix=nil)
+      params ||= {}
+      return params if params.is_a?(Array)
+      return nil unless params.is_a?(Hash)
+      params.delete(:query_parameters)
+      res = []
+      params.each do |key, val|
+        if val.is_a?(Array)
+          raise "No support for nested array parameters currently"
+        elsif val.is_a?(Hash)
+          res += clean_params(val, prefix ? (prefix + "[" + key.to_s + "]") : key.to_s)
+        else
+          if prefix
+            res << [prefix + "[" + key.to_s + "]", val.to_s]
+          else
+            res << [key.to_s, val.to_s]
+          end
+        end
+      end
+      res
     end
   
-    def upload_file_from_url
-      # TODO
+    def upload_file_from_local(endpoint, file, opts={})
+      raise "Missing File object" unless file.is_a?(File)
+      params = {
+        :size => file.size,
+        :name => opts[:name] || opts['name'] || File.basename(file.path),
+        :content_type => opts[:content_type] || opts['content_type'] || "application/octet-stream",
+        :parent_folder_id => opts[:parent_folder_id] || opts['parent_folder_id'],
+        :parent_folder_path => opts[:parent_folder_path] || opts['parent_folder_path'],
+        :on_duplicate => opts[:on_duplicate] || opts['on_duplicate']
+      }
+      res = post(endpoint, params)
+      if !res['upload_url']
+        raise ApiError.new("Unexpected error: #{res['message'] || 'no upload URL returned'}")
+      end
+      status_url = multipart_upload(res['upload_url'], res['upload_params'], params, file)
+      status_path = "/" + status_url.split(/\//, 4)[-1]
+      res = get(status_path)
+      res
+    end
+    
+    def multipart_upload(url, upload_params, params, file)
+      uri = URI.parse(url)
+      @multipart_args = upload_params.merge({})
+      @multipart_args['file'] = UploadIO.new(file, params[:content_type], params[:name])
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = uri.scheme == 'https'
+      req = Net::HTTP::Post::Multipart.new(uri.path, @multipart_args)
+      res = http.start do |stream_http|
+        stream_http.request(req)
+      end
+      raise ApiError.new("Unexpected error: #{res.body}") if !res['Location']
+      res['Location']
+    end
+  
+    def upload_file_from_url(endpoint, opts)
+      asynch = opts.delete('asynch') || opts.delete(:asynch)
+      ['url', 'name', 'size'].each do |k|
+        raise "Missing value: #{k}" unless opts[k.to_s] || opts[k.to_sym]
+      end
+
+      res = post(endpoint, opts)
+      status_url = res['status_url']
+      if !status_url
+        raise ApiError.new("Unexpected error: #{res['message'] || 'no status URL returned'}")
+      end
+      status_path = "/" + status_url.split(/\//, 4)[-1]
+      if asynch
+        return status_path
+      else
+        attachment = nil
+        while !attachment
+          res = get(status_path)
+          if res['upload_status'] == 'errored'
+            raise ApiError.new(res['message'])
+          elsif !res['upload_status']
+            raise ApiError.new("Unexpected response")
+          end
+          status_path = res['status_path'] if res['status_path']
+          attachment = res['attachment']
+          sleep (defined?(SLEEP_TIME) ? SLEEP_TIME : 5) unless attachment
+        end
+        attachment
+      end
     end
   end
 
-  class ApiError < StandardError
-  end
+  class ApiError < StandardError; end
 
   class ResultSet < Array
     def initialize(api, arr)
