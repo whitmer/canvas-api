@@ -1,8 +1,9 @@
 Gem::Specification.new do |s|
   s.name = %q{canvas-api}
-  s.version = "0.6"
+  s.version = "0.7"
 
   s.add_dependency 'json'
+  s.add_dependency 'multipart-post'
 
   s.add_development_dependency 'rspec'
   s.add_development_dependency 'ruby-debug'
