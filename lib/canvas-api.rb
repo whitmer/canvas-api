@@ -159,7 +159,13 @@ module Canvas
       request.set_form_data(clean_params(params))
       retrieve_response(request)
     end
-    
+
+    def post_multi(endpoint, params={})
+      generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
+      request = Net::HTTP::Post::Multipart.new(@uri.request_uri, params)
+      retrieve_response(request)
+    end
+
     def clean_params(params, prefix=nil)
       params ||= {}
       return params if params.is_a?(Array)
