@@ -138,10 +138,11 @@ module Canvas
       request = get_request(endpoint)
       retrieve_response(request)
     end
-  
-    def delete(endpoint)
-      generate_uri(endpoint)
+
+    def delete(endpoint, params={})
+      generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
       request = Net::HTTP::Delete.new(@uri.request_uri)
+      request.set_form_data(clean_params(params))
       retrieve_response(request)
     end
   
@@ -158,7 +159,13 @@ module Canvas
       request.set_form_data(clean_params(params))
       retrieve_response(request)
     end
-    
+
+    def post_multi(endpoint, params={})
+      generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
+      request = Net::HTTP::Post::Multipart.new(@uri.request_uri, params)
+      retrieve_response(request)
+    end
+
     def clean_params(params, prefix=nil)
       params ||= {}
       return params if params.is_a?(Array)
