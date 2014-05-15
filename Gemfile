@@ -1,7 +1,7 @@
 source "http://rubygems.org"
 
 gem 'json'
-gem 'multipart-post'
+gem 'typhoeus'
 
 group :test do
   gem 'rspec', :require => "spec"

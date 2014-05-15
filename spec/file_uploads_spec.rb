@@ -13,7 +13,8 @@ describe "File Uploads" do
       args = {
         :size => file.size,
         :name => 'canvas-api.rb',
-        :content_type => 'application/octet-stream'
+        :content_type => 'application/octet-stream',
+        :on_duplicate => nil
       }
       @api.should_receive(:post).with("/api/v1/users/self/files", args).and_return({})
       expect { @api.upload_file_from_local("/api/v1/users/self/files", file) }.to raise_error("Unexpected error: no upload URL returned")
@@ -25,7 +26,8 @@ describe "File Uploads" do
       args = {
         :size => file.size,
         :name => 'canvas-api.rb',
-        :content_type => 'application/octet-stream'
+        :content_type => 'application/octet-stream',
+        :on_duplicate => nil
       }
       @api.should_receive(:post).with("/api/v1/users/self/files", args).and_return({'upload_url' => 'http://www.bacon.com', 'upload_params' => {'a' => 1, 'b' => 2}})
       @api.should_receive(:multipart_upload).and_raise("stop at multipart") #return("http://www.return.url/api/v1/success")
@@ -36,7 +38,7 @@ describe "File Uploads" do
       it "should error on missing status URL return" do
         token_api
         file = file_handle
-        Net::HTTP.any_instance.should_receive(:start).and_return(FakeResponse.new({'body' => 'nothing good here'}))
+        Typhoeus::Request.any_instance.should_receive(:run).and_return(OpenStruct.new({'headers' => {}, 'body' => 'nothing good here'}))
         expect { 
           @api.multipart_upload("http://www.example.com/", {'a' => 1, 'b' => 2}, {:content_type => 'application/octet-stream', :name => 'file'}, file)
         }.to raise_error(Canvas::ApiError, "Unexpected error: nothing good here")
@@ -45,11 +47,11 @@ describe "File Uploads" do
       it "should upload the parameters in the correct order (file last)" do
         token_api
         file = file_handle
-        Net::HTTP.any_instance.should_receive(:start).and_return(FakeResponse.new({'Location' => 'http://www.new_status.url/api/v1/success'}))
+        Typhoeus::Request.any_instance.should_receive(:run).and_return(OpenStruct.new({'headers' => {'Location' => 'http://www.new_status.url/api/v1/success'}}))
         res = @api.multipart_upload("http://www.example.com/", {'a' => 1, 'b' => 2}, {:content_type => 'application/octet-stream', :name => 'file'}, file)
         res.should == 'http://www.new_status.url/api/v1/success'
-        args = @api.instance_variable_get('@multipart_args')
-        args.to_a[-1][0].should == 'file'
+        req = @api.instance_variable_get('@multi_request')
+        req.encoded_body.split(/&/)[-1].should == 'file=canvas-api.rb=application/octet-stream=/Users/whitmer/Workspace/canvas-api/lib/canvas-api.rb'
       end
     end
     
@@ -59,7 +61,8 @@ describe "File Uploads" do
       args = {
         :size => file.size,
         :name => 'canvas-api.rb',
-        :content_type => 'application/octet-stream'
+        :content_type => 'application/octet-stream',
+        :on_duplicate => nil
       }
       @api.should_receive(:post).with("/api/v1/users/self/files", args).and_return({'upload_url' => 'http://www.bacon.com', 'upload_params' => {'a' => 1, 'b' => 2}})
       @api.should_receive(:multipart_upload).and_return("http://www.return.url/api/v1/success")
@@ -69,20 +72,6 @@ describe "File Uploads" do
     end
   end
   
-#     def multipart_upload(url, upload_params, params, file)
-#       uri = URI.parse(url)
-#       args = upload_params.merge({})
-#       args['file'] = UploadIO.new(file, params[:content_type], params[:name])
-#       http = Net::HTTP.new(uri.host, uri.port)
-#       http.use_ssl = uri.scheme == 'https'
-#       req = Net::HTTP::Post::Multipart.new(uri.path, args)
-#       res = http.start do |stream_http|
-#         stream_http.request(req)
-#       end
-#       raise ApiError.new("Unexpected error: #{res.body}") if !res['Location']
-#       res['Location']
-#     end
-
   context "from URL" do
     it "should fail on missing values" do
       token_api

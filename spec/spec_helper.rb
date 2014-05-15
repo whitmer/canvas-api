@@ -16,7 +16,7 @@ def client_api
 end
 
 def file_handle
-  File.open(File.expand_path(File.join(File.dirname(__FILE__), '..', 'lib', 'canvas-api.rb')))
+  File.open(File.expand_path(File.join(File.dirname(__FILE__), '..', 'lib', 'canvas-api.rb')), 'r')
 end
 
 def url_called(api, *args)
@@ -26,20 +26,16 @@ def url_called(api, *args)
 end
 
 def stub_request(endpoint, args)
-  @request ||= Net::HTTP::Get.new(endpoint)
-  @response ||= FakeResponse.new
+  @request ||= Typhoeus::Request.new(endpoint)
+  @response ||= OpenStruct.new
   @response.code = (args[:code] || 200).to_s
   @response.body = args[:body].to_s
-  @response.location = args[:location]
-  @response.link = args[:link]
+  @response.headers = {
+    'Location' => args[:location],
+    'Link' => args[:link]
+  }
 
-  Net::HTTP.any_instance.should_receive(:request).at_least(0).times.and_return(@response)
+  Typhoeus::Request.any_instance.stub(:run).and_return(@response)
   @api.should_receive(:get_request).and_return(@request)
   @request
-end
-
-class FakeResponse < OpenStruct
-  def [](key)
-    self.send(key)
-  end
 end

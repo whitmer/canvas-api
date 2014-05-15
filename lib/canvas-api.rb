@@ -1,9 +1,8 @@
 require 'uri'
 require 'cgi'
 require 'net/http'
-require 'net/http/post/multipart'
 require 'json'
-
+require 'typhoeus'
 
 module Canvas
   class API
@@ -12,6 +11,7 @@ module Canvas
       @token = args[:token] && args[:token].to_s
       @client_id = args[:client_id] && args[:client_id].to_s
       @secret = args[:secret] && args[:secret].to_s
+      @insecure = !!args[:insecure]
       raise "host required" unless @host
       raise "invalid host, protocol required" unless @host.match(/^http/)
       raise "invalid host" unless @host.match(/^https?:\/\/[^\/]+$/)
@@ -104,25 +104,31 @@ module Canvas
     end
   
     def retrieve_response(request)
-      request['User-Agent'] = "CanvasAPI Ruby"
+      request.options[:headers]['User-Agent'] = "CanvasAPI Ruby"
+      if @insecure
+        request.options[:ssl_verifypeer] = false
+      end
       begin
-        response = @http.request(request)
+        response = request.run
+        raise ApiError.new("request timed out") if response.timed_out?
       rescue Timeout::Error => e
         raise ApiError.new("request timed out")
       end
-      raise ApiError.new("unexpected redirect to #{response.location}") if response.code.to_s.match(/3\d\d/)
+      raise ApiError.new("unexpected redirect to #{response.headers['Location']}") if response.code.to_s.match(/3\d\d/)
       json = JSON.parse(response.body) rescue {'error' => 'invalid JSON'}
       if !json.is_a?(Array)
         raise ApiError.new(json['error']) if json['error']
+        raise ApiError.new(json['errors']) if json['errors']
         if !response.code.to_s.match(/2\d\d/)
           json['message'] ||= "unexpected error"
+          json['status'] ||= response.code.to_s
           raise ApiError.new("#{json['status']} #{json['message']}") 
         end
       else
         json = ResultSet.new(self, json)
-        if response['link']
-          json.link = response['link']
-          json.next_endpoint = response['link'].split(/,/).detect{|rel| rel.match(/rel="next"/) }.split(/;/).first.strip[1..-2].sub(/https?:\/\/[^\/]+/, '') rescue nil
+        if response.headers['Link']
+          json.link = response.headers['Link']
+          json.next_endpoint = response.headers['Link'].split(/,/).detect{|rel| rel.match(/rel="next"/) }.split(/;/).first.strip[1..-2].sub(/https?:\/\/[^\/]+/, '') rescue nil
         end
       end
       json
@@ -130,7 +136,7 @@ module Canvas
     
     # Semi-hack so I can write better specs
     def get_request(endpoint)
-      Net::HTTP::Get.new(@uri.request_uri)
+      Typhoeus::Request.new(@uri.to_s, method: :get)
     end
   
     def get(endpoint, params=nil)
@@ -141,28 +147,29 @@ module Canvas
 
     def delete(endpoint, params={})
       generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
-      request = Net::HTTP::Delete.new(@uri.request_uri)
-      request.set_form_data(clean_params(params))
+      request = Typhoeus::Request.new(@uri.to_s, method: :delete)
+      request.options[:body] = clean_params(params)
       retrieve_response(request)
     end
   
     def put(endpoint, params={})
       generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
-      request = Net::HTTP::Put.new(@uri.request_uri)
-      request.set_form_data(clean_params(params))
+      request = Typhoeus::Request.new(@uri.to_s, method: :put)
+      request.options[:body] = clean_params(params)
       retrieve_response(request)
     end
   
     def post(endpoint, params={})
       generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
-      request = Net::HTTP::Post.new(@uri.request_uri)
-      request.set_form_data(clean_params(params))
+      request = Typhoeus::Request.new(@uri.to_s, method: :post)
+      request.options[:body] = params #clean_params(params)
       retrieve_response(request)
     end
 
     def post_multi(endpoint, params={})
       generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
-      request = Net::HTTP::Post::Multipart.new(@uri.request_uri, params)
+      request = Typhoeus::Request.new(@uri.to_s, method: :post)
+      request.options[:body] = clean_params(params)
       retrieve_response(request)
     end
 
@@ -171,12 +178,12 @@ module Canvas
       return params if params.is_a?(Array)
       return nil unless params.is_a?(Hash)
       params.delete(:query_parameters)
-      res = []
+      res = PairArray.new
       params.each do |key, val|
         if val.is_a?(Array)
           raise "No support for nested array parameters currently"
         elsif val.is_a?(Hash)
-          res += clean_params(val, prefix ? (prefix + "[" + key.to_s + "]") : key.to_s)
+          res.concat clean_params(val, prefix ? (prefix + "[" + key.to_s + "]") : key.to_s)
         else
           if prefix
             res << [prefix + "[" + key.to_s + "]", val.to_s]
@@ -194,10 +201,14 @@ module Canvas
         :size => file.size,
         :name => opts[:name] || opts['name'] || File.basename(file.path),
         :content_type => opts[:content_type] || opts['content_type'] || "application/octet-stream",
-        :parent_folder_id => opts[:parent_folder_id] || opts['parent_folder_id'],
-        :parent_folder_path => opts[:parent_folder_path] || opts['parent_folder_path'],
         :on_duplicate => opts[:on_duplicate] || opts['on_duplicate']
       }
+      if opts[:parent_folder_id] || opts['parent_folder_id']
+        params[:parent_folder_id] = opts[:parent_folder_id] || opts['parent_folder_id']
+      elsif opts[:parent_folder_path] || opts['parent_folder_path']
+        params[:parent_folder_path] = opts[:parent_folder_path] || opts['parent_folder_path']
+      end
+      
       res = post(endpoint, params)
       if !res['upload_url']
         raise ApiError.new("Unexpected error: #{res['message'] || 'no upload URL returned'}")
@@ -209,17 +220,16 @@ module Canvas
     end
     
     def multipart_upload(url, upload_params, params, file)
-      uri = URI.parse(url)
-      @multipart_args = upload_params.merge({})
-      @multipart_args['file'] = UploadIO.new(file, params[:content_type], params[:name])
-      http = Net::HTTP.new(uri.host, uri.port)
-      http.use_ssl = uri.scheme == 'https'
-      req = Net::HTTP::Post::Multipart.new(uri.path, @multipart_args)
-      res = http.start do |stream_http|
-        stream_http.request(req)
+      req = Typhoeus::Request.new(url, method: :post)
+      upload_params.each do |k, v|
+        upload_params[k] = v.to_s if v
       end
-      raise ApiError.new("Unexpected error: #{res.body}") if !res['Location']
-      res['Location']
+      upload_params['file'] = file
+      req.options[:body] = upload_params
+      @multi_request = req
+      res = req.run
+      raise ApiError.new("Unexpected error: #{res.body}") if !res.headers['Location']
+      res.headers['Location']
     end
   
     def upload_file_from_url(endpoint, opts)
@@ -275,6 +285,36 @@ module Canvas
       @next_endpoint = more.next_endpoint
       @link = more.link
       more
+    end
+  end
+  class PairArray < Array
+  end
+end
+
+
+# TODO: this is a hack that digs into the bowels of typhoeus
+module Ethon
+  class Easy
+    module Queryable
+      def recursively_generate_pairs(h, prefix, pairs)
+        case h
+        when Hash
+          h.each_pair do |k,v|
+            key = prefix.nil? ? k : "#{prefix}[#{k}]"
+            pairs_for(v, key, pairs)
+          end
+        when Canvas::PairArray
+          h.each do |k, v|
+            key = prefix.nil? ? k : "#{prefix}[#{k}]"
+            pairs_for(v, key, pairs)
+          end
+        when Array
+          h.each_with_index do |v, i|
+            key = "#{prefix}[#{i}]"
+            pairs_for(v, key, pairs)
+          end
+        end
+      end
     end
   end
 end

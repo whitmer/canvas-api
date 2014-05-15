@@ -75,7 +75,7 @@ describe "GET requests" do
       @api.generate_uri("/api/v1/bacon")
       stub_request("/api/v1/bacon", :code => 400, :body => {}.to_json)
       req = @api.get_request("/api/v1/bacon")
-      expect { @api.retrieve_response(req) }.to raise_error(Canvas::ApiError, " unexpected error")
+      expect { @api.retrieve_response(req) }.to raise_error(Canvas::ApiError, "400 unexpected error")
     end
     
     it "should parse error messages" do
