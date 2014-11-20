@@ -45,13 +45,14 @@ describe "File Uploads" do
       end
       
       it "should upload the parameters in the correct order (file last)" do
+        path_to_lib = File.expand_path(File.dirname(__FILE__) + '/../lib')
         token_api
         file = file_handle
         Typhoeus::Request.any_instance.should_receive(:run).and_return(OpenStruct.new({'headers' => {'Location' => 'http://www.new_status.url/api/v1/success'}}))
         res = @api.multipart_upload("http://www.example.com/", {'a' => 1, 'b' => 2}, {:content_type => 'application/octet-stream', :name => 'file'}, file)
         res.should == 'http://www.new_status.url/api/v1/success'
         req = @api.instance_variable_get('@multi_request')
-        req.encoded_body.split(/&/)[-1].should == 'file=canvas-api.rb=application/octet-stream=/Users/whitmer/Workspace/canvas-api/lib/canvas-api.rb'
+        req.encoded_body.split(/&/)[-1].should == "file=canvas-api.rb=application/octet-stream=#{path_to_lib}/canvas-api.rb"
       end
     end
     
