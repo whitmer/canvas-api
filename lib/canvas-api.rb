@@ -146,28 +146,32 @@ module Canvas
     end
 
     def delete(endpoint, params={})
-      generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
+      query_parameters = params.is_a?(Hash) ? params['query_parameters'] || params[:query_parameters] : {}
+      generate_uri(endpoint, query_parameters)
       request = Typhoeus::Request.new(@uri.to_s, method: :delete)
       request.options[:body] = clean_params(params)
       retrieve_response(request)
     end
   
     def put(endpoint, params={})
-      generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
+      query_parameters = params.is_a?(Hash) ? params['query_parameters'] || params[:query_parameters] : {}
+      generate_uri(endpoint, query_parameters)
       request = Typhoeus::Request.new(@uri.to_s, method: :put)
       request.options[:body] = clean_params(params)
       retrieve_response(request)
     end
   
     def post(endpoint, params={})
-      generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
+      query_parameters = params.is_a?(Hash) ? params['query_parameters'] || params[:query_parameters] : {}
+      generate_uri(endpoint, query_parameters)
       request = Typhoeus::Request.new(@uri.to_s, method: :post)
       request.options[:body] = params #clean_params(params)
       retrieve_response(request)
     end
 
     def post_multi(endpoint, params={})
-      generate_uri(endpoint, params['query_parameters'] || params[:query_parameters])
+      query_parameters = params.is_a?(Hash) ? params['query_parameters'] || params[:query_parameters] : {}
+      generate_uri(endpoint, query_parameters)
       request = Typhoeus::Request.new(@uri.to_s, method: :post)
       request.options[:body] = clean_params(params)
       retrieve_response(request)
